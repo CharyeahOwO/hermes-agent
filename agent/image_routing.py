@@ -367,13 +367,18 @@ def build_native_content_parts(
     text = (user_text or "").strip()
 
     # If at least one image attached, build a single text part that combines
-    # the user's caption (or a neutral default) with one path hint per image.
+    # the user's caption (if any) with one path hint per image.
+    #
+    # Do not invent a default user prompt for image-only gateway messages.
+    # Messaging platforms often send screenshots without captions, and adding
+    # text like "What do you see in this image?" makes the agent treat that as
+    # something the user actually asked. The path hint is enough context to
+    # accompany the native image part.
     if attached_paths:
-        base_text = text or "What do you see in this image?"
         path_hints = "\n".join(
             f"[Image attached at: {p}]" for p in attached_paths
         )
-        combined_text = f"{base_text}\n\n{path_hints}"
+        combined_text = f"{text}\n\n{path_hints}" if text else path_hints
         parts: List[Dict[str, Any]] = [{"type": "text", "text": combined_text}]
         parts.extend(image_parts)
         return parts, skipped

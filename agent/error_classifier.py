@@ -19,6 +19,45 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+def _provider_status_retry_enabled(provider: str, status_code: int) -> bool:
+    """Return True when config says an auth-like HTTP status is transient.
+
+    Some third-party gateways/WAFs intermittently return 401/403 for routing
+    hiccups even when credentials are valid. Keep the default strict for real
+    auth failures, but let specific providers opt into normal retry behavior.
+    Config shape:
+
+        agent:
+          retry_auth_statuses_for_providers:
+            custom:sharedchat-codex: [403]
+    """
+    provider_key = str(provider or "").strip()
+    if not provider_key:
+        return False
+    try:
+        from hermes_cli.config import load_config
+
+        cfg = load_config()
+        agent_cfg = cfg.get("agent") if isinstance(cfg, dict) else {}
+        if not isinstance(agent_cfg, dict):
+            return False
+        mapping = agent_cfg.get("retry_auth_statuses_for_providers") or {}
+        if not isinstance(mapping, dict):
+            return False
+        statuses = mapping.get(provider_key)
+        if statuses is None:
+            statuses = mapping.get(provider_key.lower())
+        if statuses is None:
+            statuses = mapping.get("*")
+        if isinstance(statuses, (list, tuple, set)):
+            return int(status_code) in {int(s) for s in statuses}
+        if isinstance(statuses, str):
+            return str(status_code) in {part.strip() for part in statuses.split(",")}
+    except Exception:
+        return False
+    return False
+
+
 # ── Error taxonomy ──────────────────────────────────────────────────────
 
 class FailoverReason(enum.Enum):
@@ -690,6 +729,16 @@ def _classify_by_status(
         )
 
     if status_code == 403:
+        # Some third-party gateways return transient 403s from WAF/routing
+        # layers.  Keep ordinary 403s strict, but allow configured providers
+        # to retry before considering fallback.
+        if _provider_status_retry_enabled(provider, status_code):
+            return result_fn(
+                FailoverReason.auth,
+                retryable=True,
+                should_rotate_credential=False,
+                should_fallback=True,
+            )
         # OpenRouter 403 "key limit exceeded" is actually billing
         if "key limit exceeded" in error_msg or "spending limit" in error_msg:
             return result_fn(

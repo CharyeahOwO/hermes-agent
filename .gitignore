@@ -73,6 +73,9 @@ web/public/ds-assets/
 .release_notes.md
 mini-swe-agent/
 
+# Firecrawl CLI scrape/search cache
+.firecrawl/
+
 # Nix
 .direnv/
 .nix-stamps/
@@ -86,3 +89,26 @@ docs/superpowers/*
 # also created in-repo when an agent operates in this checkout). Plans, audit
 # logs, and per-session caches are never artifacts of the codebase.
 .hermes/
+
+# Local runtime/debug junk created by MuLing's Hermes/OpenClaw experiments.
+.playwright-mcp/
+.tmp_*.py
+*.bak.*
+*.bak
+*.old
+*.tmp
+*.log
+*.pid
+*.sock
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.mp4
+*.webm
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z

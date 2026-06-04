@@ -1674,7 +1674,7 @@ class GatewayRunner:
     _restart_detached: bool = False
     _restart_via_service: bool = False
     _stop_task: Optional[asyncio.Task] = None
-    _session_model_overrides: Dict[str, Dict[str, str]] = {}
+    _session_model_overrides: Dict[str, Dict[str, Any]] = {}
     _session_reasoning_overrides: Dict[str, Dict[str, Any]] = {}
 
     def __init__(self, config: Optional[GatewayConfig] = None):
@@ -1759,8 +1759,8 @@ class GatewayRunner:
         self._agent_cache_lock = _threading.Lock()
 
         # Per-session model overrides from /model command.
-        # Key: session_key, Value: dict with model/provider/api_key/base_url/api_mode
-        self._session_model_overrides: Dict[str, Dict[str, str]] = {}
+        # Key: session_key, Value: dict with model/provider/api_key/base_url/api_mode/request_overrides
+        self._session_model_overrides: Dict[str, Dict[str, Any]] = {}
         # Per-session reasoning effort overrides from /reasoning.
         # Key: session_key, Value: parsed reasoning config dict.
         self._session_reasoning_overrides: Dict[str, Dict[str, Any]] = {}
@@ -2372,11 +2372,13 @@ class GatewayRunner:
         override = self._session_model_overrides.get(resolved_session_key) if resolved_session_key else None
         if override:
             override_model = override.get("model", model)
+            _override_request_overrides = override.get("request_overrides")
             override_runtime = {
                 "provider": override.get("provider"),
                 "api_key": override.get("api_key"),
                 "base_url": override.get("base_url"),
                 "api_mode": override.get("api_mode"),
+                "request_overrides": dict(_override_request_overrides) if isinstance(_override_request_overrides, dict) else {},
             }
             if override_runtime.get("api_key"):
                 logger.debug(
@@ -2462,16 +2464,16 @@ class GatewayRunner:
             ),
         }
 
+        base_overrides = dict(runtime_kwargs.get("request_overrides") or {})
         service_tier = getattr(self, "_service_tier", None)
-        if not service_tier:
-            route["request_overrides"] = {}
-            return route
-
-        try:
-            overrides = resolve_fast_mode_overrides(route["model"])
-        except Exception:
-            overrides = None
-        route["request_overrides"] = overrides or {}
+        if service_tier:
+            try:
+                fast_overrides = resolve_fast_mode_overrides(route["model"])
+            except Exception:
+                fast_overrides = None
+            if fast_overrides:
+                base_overrides.update(fast_overrides)
+        route["request_overrides"] = base_overrides
         return route
 
     async def _handle_adapter_fatal_error(self, adapter: BasePlatformAdapter) -> None:
@@ -10356,12 +10358,14 @@ class GatewayRunner:
                             f"via {result.provider_label or result.target_provider}. "
                             f"Adjust your self-identification accordingly.]"
                         )
+                        _result_request_overrides = getattr(result, "request_overrides", None)
                         _self._session_model_overrides[_session_key] = {
                             "model": result.new_model,
                             "provider": result.target_provider,
                             "api_key": result.api_key,
                             "base_url": result.base_url,
                             "api_mode": result.api_mode,
+                            "request_overrides": dict(_result_request_overrides) if isinstance(_result_request_overrides, dict) else {},
                         }
 
                         # Evict cached agent so the next turn creates a fresh
@@ -10496,12 +10500,14 @@ class GatewayRunner:
         )
 
         # Store session override so next agent creation uses the new model
+        _result_request_overrides = getattr(result, "request_overrides", None)
         self._session_model_overrides[session_key] = {
             "model": result.new_model,
             "provider": result.target_provider,
             "api_key": result.api_key,
             "base_url": result.base_url,
             "api_mode": result.api_mode,
+            "request_overrides": dict(_result_request_overrides) if isinstance(_result_request_overrides, dict) else {},
         }
 
         # Evict cached agent so the next turn creates a fresh agent from the

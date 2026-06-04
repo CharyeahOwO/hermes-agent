@@ -485,6 +485,10 @@ def _requires_bearer_auth(base_url: str | None) -> bool:
     return (
         normalized.startswith(("https://api.minimax.io/anthropic", "https://api.minimaxi.com/anthropic"))
         or "azure.com" in normalized
+        # Hub-style Anthropic-compatible endpoints accept either x-api-key or
+        # Bearer when sent alone, but reject the Anthropic SDK's default
+        # api_key path because it also emits an Authorization placeholder.
+        or base_url_host_matches(normalized, "hub.oaifree.com")
     )
 
 

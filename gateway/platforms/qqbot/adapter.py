@@ -1082,7 +1082,10 @@ class QQAdapter(BasePlatformAdapter):
 
         chat_type = parsed.get("chat_type", "")
         chat_id = parsed.get("chat_id", "")
-        if chat_type == "c2c":
+        # Gateway session keys use the generic "dm" chat_type for private
+        # chats, while QQ's interaction payload reports the scene as C2C.
+        # Treat both spellings as the same private-chat approval scope.
+        if chat_type in {"c2c", "dm"}:
             return bool(chat_id) and operator == chat_id
 
         if chat_type in {"group", "guild"}:
@@ -2667,7 +2670,7 @@ class QQAdapter(BasePlatformAdapter):
 
         req = ApprovalRequest(
             session_key=session_key,
-            title=f"Execute this command?",
+            title=f"要执行这条命令吗？",
             description=description,
             command_preview=command,
             timeout_sec=self._APPROVAL_TIMEOUT_SECONDS,

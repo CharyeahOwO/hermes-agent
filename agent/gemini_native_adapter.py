@@ -35,13 +35,21 @@ DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 
 
 def is_native_gemini_base_url(base_url: str) -> bool:
-    """Return True when the endpoint speaks Gemini's native REST API."""
+    """Return True when the endpoint speaks Gemini's native REST API.
+
+    Native Gemini-compatible gateways may use their own hostname while keeping
+    the Google REST path shape under /v1beta.  Treat those as native too so a
+    custom provider like api.nyaovo.com/v1beta can reuse the Gemini transport
+    instead of being mistaken for OpenAI /chat/completions.
+    """
     normalized = str(base_url or "").strip().rstrip("/").lower()
     if not normalized:
         return False
-    if "generativelanguage.googleapis.com" not in normalized:
+    if normalized.endswith("/openai"):
         return False
-    return not normalized.endswith("/openai")
+    if "generativelanguage.googleapis.com" in normalized:
+        return True
+    return normalized.endswith("/v1beta")
 
 
 def probe_gemini_tier(

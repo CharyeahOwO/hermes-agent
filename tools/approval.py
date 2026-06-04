@@ -1023,6 +1023,42 @@ def check_dangerous_command(command: str, env_type: str,
 # Combined pre-exec guard (tirith + dangerous command detection)
 # =========================================================================
 
+_TIRITH_SEVERITY_ZH = {
+    "critical": "严重",
+    "high": "高危",
+    "medium": "中危",
+    "low": "低危",
+    "info": "提示",
+}
+
+
+_TIRITH_TITLE_ZH = {
+    "Pipe to interpreter": "把命令输出直接交给解释器执行",
+}
+
+
+_TIRITH_DESC_ZH = {
+    "Command pipes output from 'env' directly to interpreter 'python'. Downloaded content will be executed without inspection.": (
+        "这条命令会把 `env` 这类命令的输出直接通过管道交给 `python` 执行。"
+        "如果前半段输出里混进了下载内容或非预期内容，Python 会直接执行，没机会先检查。"
+    ),
+    "Downloaded content will be executed without inspection.": (
+        "下载或生成出来的内容会被直接执行，中间没有人工检查。"
+    ),
+}
+
+
+def _zh_tirith_text(text: str, mapping: dict[str, str]) -> str:
+    if not text:
+        return ""
+    if text in mapping:
+        return mapping[text]
+    lowered = text.lower()
+    if "pipe" in lowered and "interpreter" in lowered:
+        return "把命令输出直接交给解释器执行"
+    return text
+
+
 def _format_tirith_description(tirith_result: dict) -> str:
     """Build a human-readable description from tirith findings.
 
@@ -1032,22 +1068,25 @@ def _format_tirith_description(tirith_result: dict) -> str:
     findings = tirith_result.get("findings") or []
     if not findings:
         summary = tirith_result.get("summary") or "security issue detected"
-        return f"Security scan: {summary}"
+        return f"安全扫描：{summary}"
 
     parts = []
     for f in findings:
-        severity = f.get("severity", "")
-        title = f.get("title", "")
-        desc = f.get("description", "")
+        severity = _TIRITH_SEVERITY_ZH.get(
+            str(f.get("severity", "")).lower(),
+            f.get("severity", ""),
+        )
+        title = _zh_tirith_text(f.get("title", ""), _TIRITH_TITLE_ZH)
+        desc = _zh_tirith_text(f.get("description", ""), _TIRITH_DESC_ZH)
         if title and desc:
             parts.append(f"[{severity}] {title}: {desc}" if severity else f"{title}: {desc}")
         elif title:
             parts.append(f"[{severity}] {title}" if severity else title)
     if not parts:
         summary = tirith_result.get("summary") or "security issue detected"
-        return f"Security scan: {summary}"
+        return f"安全扫描：{summary}"
 
-    return "Security scan — " + "; ".join(parts)
+    return "安全扫描 — " + "; ".join(parts)
 
 
 def check_all_command_guards(command: str, env_type: str,

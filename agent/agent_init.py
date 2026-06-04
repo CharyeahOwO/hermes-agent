@@ -84,13 +84,13 @@ def _custom_provider_model_matches(agent_model: str, entry: Dict[str, Any]) -> b
     return provider_model == str(agent_model or "").strip().lower()
 
 
-def _custom_provider_extra_body_for_agent(
+def _custom_provider_request_extras_for_agent(
     *,
     provider: str,
     model: str,
     base_url: str,
     custom_providers: List[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+) -> Optional[Dict[str, Dict[str, Any]]]:
     if (provider or "").strip().lower() != "custom":
         return None
 
@@ -98,41 +98,79 @@ def _custom_provider_extra_body_for_agent(
     if not target_url:
         return None
 
-    fallback: Optional[Dict[str, Any]] = None
+    fallback: Optional[Dict[str, Dict[str, Any]]] = None
     for entry in custom_providers or []:
         if not isinstance(entry, dict):
             continue
         if _normalized_custom_base_url(entry.get("base_url")) != target_url:
             continue
+
+        extras: Dict[str, Dict[str, Any]] = {}
         extra_body = entry.get("extra_body")
-        if not isinstance(extra_body, dict) or not extra_body:
+        if isinstance(extra_body, dict) and extra_body:
+            extras["extra_body"] = dict(extra_body)
+        extra_headers = entry.get("extra_headers")
+        if isinstance(extra_headers, dict) and extra_headers:
+            extras["extra_headers"] = {
+                str(key): str(value)
+                for key, value in extra_headers.items()
+                if key and value is not None
+            }
+        request_overrides = entry.get("request_overrides")
+        if isinstance(request_overrides, dict) and request_overrides:
+            extras["request_overrides"] = dict(request_overrides)
+        if not extras:
             continue
+
         provider_model = str(entry.get("model", "") or "").strip()
         if provider_model:
             if _custom_provider_model_matches(model, entry):
-                return dict(extra_body)
+                return extras
         elif fallback is None:
-            fallback = dict(extra_body)
+            fallback = extras
 
     return fallback
 
 
-def _merge_custom_provider_extra_body(agent, custom_providers: List[Dict[str, Any]]) -> None:
-    extra_body = _custom_provider_extra_body_for_agent(
+def _merge_custom_provider_request_extras(agent, custom_providers: List[Dict[str, Any]]) -> None:
+    extras = _custom_provider_request_extras_for_agent(
         provider=agent.provider,
         model=agent.model,
         base_url=agent.base_url,
         custom_providers=custom_providers,
     )
-    if not extra_body:
+    if not extras:
         return
 
     overrides = dict(getattr(agent, "request_overrides", {}) or {})
-    merged_extra_body = dict(extra_body)
-    existing_extra_body = overrides.get("extra_body")
-    if isinstance(existing_extra_body, dict):
-        merged_extra_body.update(existing_extra_body)
-    overrides["extra_body"] = merged_extra_body
+    extra_body = extras.get("extra_body")
+    if isinstance(extra_body, dict) and extra_body:
+        merged_extra_body = dict(extra_body)
+        existing_extra_body = overrides.get("extra_body")
+        if isinstance(existing_extra_body, dict):
+            merged_extra_body.update(existing_extra_body)
+        overrides["extra_body"] = merged_extra_body
+
+    extra_headers = extras.get("extra_headers")
+    if isinstance(extra_headers, dict) and extra_headers:
+        merged_extra_headers = dict(extra_headers)
+        existing_extra_headers = overrides.get("extra_headers")
+        if isinstance(existing_extra_headers, dict):
+            merged_extra_headers.update(existing_extra_headers)
+        overrides["extra_headers"] = merged_extra_headers
+
+    request_overrides = extras.get("request_overrides")
+    if isinstance(request_overrides, dict) and request_overrides:
+        for key, value in request_overrides.items():
+            if key in {"extra_body", "extra_headers"} and isinstance(value, dict):
+                merged_value = dict(value)
+                existing_value = overrides.get(key)
+                if isinstance(existing_value, dict):
+                    merged_value.update(existing_value)
+                overrides[key] = merged_value
+            else:
+                overrides.setdefault(key, value)
+
     agent.request_overrides = overrides
 
 
@@ -1323,7 +1361,7 @@ def init_agent(
     # Store for reuse by _check_compression_model_feasibility (auxiliary
     # compression model context-length detection needs the same list).
     agent._custom_providers = _custom_providers
-    _merge_custom_provider_extra_body(agent, _custom_providers)
+    _merge_custom_provider_request_extras(agent, _custom_providers)
 
     # Check custom_providers per-model context_length
     if _config_context_length is None and _custom_providers:

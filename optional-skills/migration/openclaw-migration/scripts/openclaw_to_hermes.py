@@ -14,6 +14,21 @@ import json
 import os
 import re
 import shutil
+
+# ---- muling patch: tolerate same-file copy during OpenClaw migration ----
+import shutil as _muling_shutil
+_muling_orig_copy2 = _muling_shutil.copy2
+
+def _muling_safe_copy2(src, dst, *args, **kwargs):
+    try:
+        return _muling_orig_copy2(src, dst, *args, **kwargs)
+    except _muling_shutil.SameFileError:
+        print(f"⚠ skip same file copy: {src} -> {dst}")
+        return dst
+
+_muling_shutil.copy2 = _muling_safe_copy2
+# ---- end muling patch ----
+
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path

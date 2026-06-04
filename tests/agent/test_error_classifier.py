@@ -1437,3 +1437,47 @@ class TestMultimodalToolContentUnsupported:
         e = MockAPIError("bad request: missing field 'model'", status_code=400)
         result = classify_api_error(e, provider="openrouter", model="anthropic/claude-sonnet-4")
         assert result.reason != FailoverReason.multimodal_tool_content_unsupported
+
+
+
+class TestRetryAuthStatusesForProviders:
+    def test_configured_provider_retries_403_before_fallback(self, monkeypatch):
+        import hermes_cli.config as cfg
+
+        monkeypatch.setattr(
+            cfg,
+            "load_config",
+            lambda: {
+                "agent": {
+                    "retry_auth_statuses_for_providers": {
+                        "custom:sharedchat-codex": [403],
+                    },
+                },
+            },
+        )
+        e = MockAPIError("Your request was blocked.", status_code=403)
+        result = classify_api_error(e, provider="custom:sharedchat-codex", model="gpt-5.5")
+        assert result.reason == FailoverReason.auth
+        assert result.retryable is True
+        assert result.should_fallback is True
+        assert result.should_rotate_credential is False
+
+    def test_unconfigured_provider_keeps_403_non_retryable(self, monkeypatch):
+        import hermes_cli.config as cfg
+
+        monkeypatch.setattr(
+            cfg,
+            "load_config",
+            lambda: {
+                "agent": {
+                    "retry_auth_statuses_for_providers": {
+                        "custom:sharedchat-codex": [403],
+                    },
+                },
+            },
+        )
+        e = MockAPIError("Your request was blocked.", status_code=403)
+        result = classify_api_error(e, provider="openai-codex", model="gpt-5.5")
+        assert result.reason == FailoverReason.auth
+        assert result.retryable is False
+        assert result.should_fallback is True

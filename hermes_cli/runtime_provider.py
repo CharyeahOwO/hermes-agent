@@ -531,6 +531,16 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
                     extra_body = entry.get("extra_body")
                     if isinstance(extra_body, dict):
                         result["extra_body"] = dict(extra_body)
+                    extra_headers = entry.get("extra_headers")
+                    if isinstance(extra_headers, dict):
+                        result["extra_headers"] = {
+                            str(key): str(value)
+                            for key, value in extra_headers.items()
+                            if key and value is not None
+                        }
+                    request_overrides = entry.get("request_overrides")
+                    if isinstance(request_overrides, dict):
+                        result["request_overrides"] = dict(request_overrides)
                     # The v11→v12 migration writes the API mode under the new
                     # ``transport`` field, but hand-edited configs may still
                     # use the legacy ``api_mode`` spelling.  Accept both —
@@ -559,6 +569,16 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
                         extra_body = entry.get("extra_body")
                         if isinstance(extra_body, dict):
                             result["extra_body"] = dict(extra_body)
+                        extra_headers = entry.get("extra_headers")
+                        if isinstance(extra_headers, dict):
+                            result["extra_headers"] = {
+                                str(key): str(value)
+                                for key, value in extra_headers.items()
+                                if key and value is not None
+                            }
+                        request_overrides = entry.get("request_overrides")
+                        if isinstance(request_overrides, dict):
+                            result["request_overrides"] = dict(request_overrides)
                         api_mode = _parse_api_mode(entry.get("api_mode") or entry.get("transport"))
                         if api_mode:
                             result["api_mode"] = api_mode
@@ -592,7 +612,7 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
         provider_menu_key = f"custom:{provider_key_norm}" if provider_key_norm else ""
         if requested_norm not in {name_norm, menu_key, provider_key_norm, provider_menu_key}:
             continue
-        result = {
+        result: Dict[str, Any] = {
             "name": name.strip(),
             "base_url": base_url.strip(),
             "api_key": str(entry.get("api_key", "") or "").strip(),
@@ -605,6 +625,16 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
         extra_body = entry.get("extra_body")
         if isinstance(extra_body, dict):
             result["extra_body"] = dict(extra_body)
+        extra_headers = entry.get("extra_headers")
+        if isinstance(extra_headers, dict):
+            result["extra_headers"] = {
+                str(key): str(value)
+                for key, value in extra_headers.items()
+                if key and value is not None
+            }
+        request_overrides = entry.get("request_overrides")
+        if isinstance(request_overrides, dict):
+            result["request_overrides"] = dict(request_overrides)
         api_mode = _parse_api_mode(entry.get("api_mode"))
         if api_mode:
             result["api_mode"] = api_mode
@@ -617,10 +647,31 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
 
 
 def _custom_provider_request_overrides(custom_provider: Dict[str, Any]) -> Dict[str, Any]:
+    overrides: Dict[str, Any] = {}
+
     extra_body = custom_provider.get("extra_body")
-    if not isinstance(extra_body, dict) or not extra_body:
-        return {}
-    return {"extra_body": dict(extra_body)}
+    if isinstance(extra_body, dict) and extra_body:
+        overrides["extra_body"] = dict(extra_body)
+
+    extra_headers = custom_provider.get("extra_headers")
+    if isinstance(extra_headers, dict) and extra_headers:
+        overrides["extra_headers"] = {
+            str(key): str(value)
+            for key, value in extra_headers.items()
+            if key and value is not None
+        }
+
+    request_overrides = custom_provider.get("request_overrides")
+    if isinstance(request_overrides, dict) and request_overrides:
+        for key, value in request_overrides.items():
+            if key in {"extra_body", "extra_headers"} and isinstance(value, dict):
+                merged_value = dict(overrides.get(key) or {})
+                merged_value.update(value)
+                overrides[key] = merged_value
+            else:
+                overrides[key] = value
+
+    return overrides
 
 
 def _resolve_named_custom_runtime(
