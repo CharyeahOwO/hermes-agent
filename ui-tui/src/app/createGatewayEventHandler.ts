@@ -11,7 +11,7 @@ import type {
 } from '../gatewayTypes.js'
 import { rpcErrorMessage } from '../lib/rpc.js'
 import { topLevelSubagents } from '../lib/subagentTree.js'
-import { formatToolCall, stripAnsi } from '../lib/text.js'
+import { formatAbandonedClarify, formatToolCall, stripAnsi } from '../lib/text.js'
 import { fromSkin } from '../theme.js'
 import type { Msg, SubagentProgress, SubagentStatus } from '../types.js'
 
@@ -86,6 +86,31 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
   let pendingThinkingStatus = ''
   let thinkingStatusTimer: null | ReturnType<typeof setTimeout> = null
   let startupPromptSubmitted = false
+
+  // Request IDs of clarify prompts we've already flushed to the transcript as
+  // an abandoned-prompt record, so the timeout path and an explicit cancel
+  // can't both persist the same prompt twice.
+  const persistedAbandonedClarify = new Set<string>()
+
+  // A still-present clarify overlay when a new assistant message begins means
+  // the clarify was abandoned — almost always a backend timeout (the agent got
+  // an empty answer back and resumed).  The live overlay is about to be torn
+  // down by turnController.idle(); flush the question + options into the
+  // transcript first so they don't vanish while the reply refers to them.
+  const flushAbandonedClarifyOnResume = () => {
+    const { clarify } = getOverlayState()
+
+    if (!clarify || persistedAbandonedClarify.has(clarify.requestId)) {
+      return
+    }
+
+    persistedAbandonedClarify.add(clarify.requestId)
+    appendMessage({
+      role: 'system',
+      text: formatAbandonedClarify(clarify.question, clarify.choices, 'timed out')
+    })
+    patchOverlayState({ clarify: null })
+  }
 
   // Inject the disk-save callback into turnController so recordMessageComplete
   // can fire-and-forget a persist without having to plumb a gateway ref around.
@@ -421,6 +446,9 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
       }
 
       case 'message.start':
+        // If a clarify prompt is still live as the reply begins streaming, it
+        // was abandoned (timeout) — persist it before the overlay is cleared.
+        flushAbandonedClarifyOnResume()
         resetAgentsNudgeTurnState()
         turnController.startMessage()
 
@@ -614,6 +642,9 @@ export function createGatewayEventHandler(ctx: GatewayEventHandlerContext): (ev:
         return
 
       case 'tool.start':
+        // Agent resumed with another tool call after an abandoned clarify
+        // (timeout) — persist the vanishing prompt, same as on message.start.
+        flushAbandonedClarifyOnResume()
         turnController.recordTodos(ev.payload.todos)
         turnController.recordToolStart(
           ev.payload.tool_id,

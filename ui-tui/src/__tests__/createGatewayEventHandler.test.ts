@@ -1113,4 +1113,65 @@ describe('createGatewayEventHandler', () => {
       vi.useRealTimers()
     }
   })
+
+  it('persists an abandoned (timed-out) clarify into the transcript when the reply resumes', () => {
+    const appended: Msg[] = []
+    const onEvent = createGatewayEventHandler(buildCtx(appended))
+
+    // Backend clarify timed out: the overlay is still live (Python returned an
+    // empty answer and the agent resumed), then the next assistant reply opens.
+    patchOverlayState({
+      clarify: { choices: ['Scope A', 'Scope B'], question: 'How do you want to scope?', requestId: 'req-1' }
+    })
+
+    onEvent({ payload: {}, type: 'message.start' } as any)
+
+    const record = appended.find(msg => msg.role === 'system' && msg.text.startsWith('ask How do you want to scope?'))
+    expect(record).toBeDefined()
+    expect(record?.text).toContain('1. Scope A')
+    expect(record?.text).toContain('2. Scope B')
+    expect(record?.text).toContain('timed out — no selection')
+    // The live overlay is cleared so it doesn't double-render with the record.
+    expect(getOverlayState().clarify).toBeNull()
+  })
+
+  it('persists an abandoned clarify when the agent resumes with another tool call', () => {
+    const appended: Msg[] = []
+    const onEvent = createGatewayEventHandler(buildCtx(appended))
+
+    patchOverlayState({
+      clarify: { choices: ['Yes', 'No'], question: 'Proceed?', requestId: 'req-2' }
+    })
+
+    onEvent({ payload: { context: '', name: 'search', tool_id: 'tool-1' }, type: 'tool.start' } as any)
+
+    const record = appended.find(msg => msg.role === 'system' && msg.text.startsWith('ask Proceed?'))
+    expect(record).toBeDefined()
+    expect(getOverlayState().clarify).toBeNull()
+  })
+
+  it('only persists an abandoned clarify once across resume events', () => {
+    const appended: Msg[] = []
+    const onEvent = createGatewayEventHandler(buildCtx(appended))
+
+    patchOverlayState({
+      clarify: { choices: ['A'], question: 'Pick?', requestId: 'req-3' }
+    })
+
+    onEvent({ payload: {}, type: 'message.start' } as any)
+    // A second resume event must not re-persist the same prompt.
+    onEvent({ payload: { context: '', name: 'search', tool_id: 'tool-1' }, type: 'tool.start' } as any)
+
+    const records = appended.filter(msg => msg.role === 'system' && msg.text.startsWith('ask Pick?'))
+    expect(records).toHaveLength(1)
+  })
+
+  it('does not persist anything when no clarify is pending on resume', () => {
+    const appended: Msg[] = []
+    const onEvent = createGatewayEventHandler(buildCtx(appended))
+
+    onEvent({ payload: {}, type: 'message.start' } as any)
+
+    expect(appended.some(msg => msg.role === 'system' && msg.text.startsWith('ask '))).toBe(false)
+  })
 })
